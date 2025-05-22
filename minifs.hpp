@@ -9,6 +9,15 @@
 #include <memory>
 #include <cstring>
 
+
+//位图块定义
+constexpr int SUPERBLOCK_START = 0;
+constexpr int INODE_BITMAP_BLOCK_START = SUPERBLOCK_START + 1;
+constexpr int INODE_BITMAP_BLOCK_COUNT = 1;
+constexpr int DATA_BITMAP_BLOCK_START = INODE_BITMAP_BLOCK_START + INODE_BITMAP_BLOCK_COUNT;
+constexpr int DATA_BITMAP_BLOCK_COUNT = 1;
+
+
 // 基本常量定义
 //单个数据块的大小512字节-》 虚拟磁盘内数据块的数量 -》
 constexpr int BLOCK_SIZE = 512; 
@@ -16,8 +25,9 @@ constexpr int BLOCK_COUNT = 1024;
 constexpr int INODE_SIZE = 64;  //一个节点所占大小，可以知道：1块内有8(BLOCK_SIZE / INODE_SIZE)个i结点
 constexpr int INODE_BLOCKS = 16;  //存放i节点的块数
 constexpr int INODE_NUM = (INODE_BLOCKS * (BLOCK_SIZE / INODE_SIZE)); //i结点总数是128， 对应i结点位图需要128bit，即16字节
-constexpr int INODE_START = 1; //i结点起始块号， 块0用于超级块等其他作用
+constexpr int INODE_START = DATA_BITMAP_BLOCK_START + DATA_BITMAP_BLOCK_COUNT; //i结点起始块号，对应块3， 块0用于超级块
 constexpr int DATA_START = (INODE_START + INODE_BLOCKS); //数据区域的起始块号， 总块号-起始块号就是数据块数量：1024-17，即1007，对应1007bit，需要126字节
+constexpr int DATA_BLOCKS_NUM = BLOCK_COUNT - DATA_START;
 constexpr int DIRSIZ = 28; //目录项中文件名的最大长度
 
 
@@ -35,6 +45,9 @@ struct superblock {
     int nblocks;        // 数据块数
     int inode_start;    // i-节点区起始块
     int data_start;     // 数据区起始块
+    //记录新增的位图的信息
+    int inode_bitmap_start_block;
+    int data_bitmap_start_block;
 };
 
 // 磁盘i-节点结构体
@@ -58,7 +71,15 @@ private:
     using Byte = uint8_t; //相当于typedef，给类型起了别名
     std::vector<Byte> disk;  // 虚拟磁盘，使用动态数组代替固定数组
 
+    // 位图操作辅助函数
+    // 'bitmap_block_start' 是指这个位图（inode位图或data位图）在磁盘上的起始块号
+    // 'index' 是指要操作的 i-节点号 或 数据块号 (相对于数据区的起始)
 public:
+    void set_bit(int bitmap_block_start, int index);
+    void clear_bit(int bitmap_block_start, int index);
+    bool test_bit(int bitmap_block_start, int index); // 检查位是否被设置
+    int find_free_bit(int bitmap_block_start, int total_bits, int min_allowed_index); // 查找第一个空闲位
+    
     // 文件系统状态枚举
     enum class FSStatus 
     { 
@@ -82,6 +103,16 @@ public:
     // 目录操作
     void listRoot();                          // 列出根目录内容
     int checkFSConsistency();                 // 检查文件系统一致性
+    int mkdir(int parent_dir_inum, const char* name);  // 在指定父目录下创建新目录
+    void listDir(int dir_inum); // 列出指定目录的内容
+
+    //i结点和数据块分配
+    int balloc();
+    void bfree(int absolute_block_num);
+    int ialloc(int16_t type);
+    void ifree(int inum);
+
+
 };
 
 #endif // MINIFS_HPP

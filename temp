@@ -1,0 +1,134 @@
+
+int main(int argc, char *argv[]) {
+    MiniFS fs; // 创建文件系统对象
+
+    const std::string fsfile = "my_unix_fs.dat";
+    std::cout << "尝试加载文件系统镜像: " << fsfile << std::endl;
+    MiniFS::FSStatus load_result = fs.loadFS(fsfile);
+    
+    if (load_result != MiniFS::FSStatus::OK) 
+    {
+        if (load_result == MiniFS::FSStatus::FAIL) {
+            std::cout << "未检测到磁盘镜像，正在格式化新文件系统..." << std::endl;
+        } else if (load_result == MiniFS::FSStatus::CORRUPT) {
+            std::cout << "磁盘镜像已损坏或格式不匹配，正在重新格式化..." << std::endl;
+        }
+        
+        std::cout << "开始格式化文件系统..." << std::endl;
+        fs.format();
+        std::cout << "文件系统格式化完成" << std::endl;
+    } 
+    else 
+    {
+        std::cout << "磁盘镜像加载成功！" << std::endl;
+        
+        std::cout << "开始文件系统一致性检查..." << std::endl;
+        if (fs.checkFSConsistency() != 0) 
+        {
+            std::cout << "文件系统一致性检查失败，正在重新格式化..." << std::endl;
+            fs.format();
+        }
+        else {
+            std::cout << "文件系统一致性检查通过" << std::endl;
+        }
+    }
+    
+    std::cout << std::endl << "准备列出根目录内容..." << std::endl;
+    fs.listRoot();
+    
+    // 在此处可以添加命令处理循环，实现用户交互
+    
+    std::cout << std::endl << "正在保存文件系统..." << std::endl;
+    if (fs.saveFS(fsfile) == 0) {
+        std::cout << "文件系统已成功保存到 " << fsfile << std::endl;
+    } else {
+        std::cout << "保存文件系统失败！" << std::endl;
+    }
+    
+    std::cout << "程序结束" << std::endl;
+    return 0;
+}
+
+
+//又一版测试
+// 在 main 函数中
+int main(int argc, char *argv[]) {
+    const std::string fsfile = "my_unix_fs.dat";
+    MiniFS fs;
+    
+    // 尝试加载已有文件系统，如果失败则格式化
+    std::cout << "尝试加载文件系统镜像: " << fsfile << std::endl;    MiniFS::FSStatus load_result = fs.loadFS(fsfile);
+      if (load_result != MiniFS::FSStatus::OK) {
+        std::cout << "未检测到有效的文件系统镜像，正在格式化..." << std::endl;
+        fs.format();
+    } else {
+        std::cout << "文件系统镜像加载成功!" << std::endl;
+        // 跳过一致性检查，直接执行目录操作
+        std::cout << "跳过文件系统一致性检查，直接测试目录操作..." << std::endl;
+        // 可选: 如果需要强制格式化文件系统，取消下面的注释
+        // fs.format();
+        // std::cout << "文件系统已重新格式化" << std::endl;
+    }
+    
+    // 运行测试
+    // test_bitmap_operations(fs);
+    test_directory_operations(fs);
+    
+    // 保存文件系统状态
+    std::cout << "正在保存文件系统..." << std::endl;
+    if (fs.saveFS(fsfile) == 0) {
+        std::cout << "文件系统已成功保存到 " << fsfile << std::endl;
+    } else {
+        std::cout << "保存文件系统失败!" << std::endl;
+    }
+    
+    return 0;
+}
+
+
+
+
+//自己写的mkdir初版：
+//父目录的的i结点号， 要创建的新目录的名字name
+int MiniFS::mkdir(int parent_dir_inum, const char *name) {
+
+    int block = INODE_BITMAP_BLOCK_START + (parent_dir_inum * INODE_SIZE) / BLOCK_SIZE;
+    int offset = (parent_dir_inum * INODE_SIZE) % BLOCK_SIZE;
+    Byte buf[BLOCK_SIZE];
+    int child_dir_inum = ialloc(T_FILE);
+    struct dinode * parent_inode = (struct dinode *)(block + offset);
+    //parent_inode->addrs[0]//拿到数据块指针
+    struct dirent * parent_dir_data = (struct dirent *)parent_dir_inum;
+    //这里需要在后面加一项dirent，  
+    （child_dir_inum, name）
+
+    parent_inode->nlink += 1;
+    parent_inode->size = 
+    //parent_inode->type不修改;
+
+
+    int flag = test_bit(INODE_BITMAP_BLOCK_START, parent_dir_inum);
+    if (flag == 0)
+    {
+        //父目录不存在
+    }
+    if (0<strlen(name) <= DIRSIZ)
+    {
+        合法
+    }    
+
+
+    //利用child_dir_inum去访问child->inode指向的空间，把下面的复制去，由child->inode->address[0]访问数据空间写入struct dirent
+    readBlock(,buf)
+    struct dinode inode;
+    inode.addrs;
+    inode.nlink = 1;
+    inode.size = 0;
+    inode.type = T_DIR;
+
+    struct dirent new_dir;
+    new_dir.inum = ;
+    strcpy(new_dir.name, name);
+
+    return 0; // 返回新创建目录的 inode 号
+}

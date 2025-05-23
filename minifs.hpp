@@ -1,6 +1,6 @@
 #ifndef MINIFS_HPP
 #define MINIFS_HPP
-
+#include <iomanip> // std::setw 要用这个头文件
 #include <string>
 #include <cstdint>
 #include <iostream>
@@ -8,8 +8,9 @@
 #include <vector>
 #include <memory>
 #include <cstring>
+#include <sstream>
 
-
+typedef unsigned char Byte;
 //位图块定义
 constexpr int SUPERBLOCK_START = 0;
 constexpr int INODE_BITMAP_BLOCK_START = SUPERBLOCK_START + 1;
@@ -67,52 +68,44 @@ struct dirent {
 
 // 文件系统类
 class MiniFS {
-private:
-    using Byte = uint8_t; //相当于typedef，给类型起了别名
-    std::vector<Byte> disk;  // 虚拟磁盘，使用动态数组代替固定数组
-
-    // 位图操作辅助函数
-    // 'bitmap_block_start' 是指这个位图（inode位图或data位图）在磁盘上的起始块号
-    // 'index' 是指要操作的 i-节点号 或 数据块号 (相对于数据区的起始)
 public:
+    enum class FSStatus { OK, FAIL, CORRUPT, NOT_FOUND };
+
+    static const int ROOT_INUM_CONST = 1; // 根目录的i-节点号通常约定为1
+    static const int INVALID_INUM_CONST = -1; // 表示无效或未找到的i-节点号
+
+    MiniFS();
+    void readBlock(int blockNum, void* buf);
+    void writeBlock(int blockNum, const void* buf);
+    int saveFS(const std::string& filename);
+    FSStatus loadFS(const std::string& filename);
+    void format();
+    int mkdir(int parent_dir_inum, const char* name); // 创建目录的核心实现
+    void listDir(int dir_inum);                       // 列出指定inum目录的内容
+    void listRoot();                                  // 列出根目录内容
+    int checkFSConsistency();
+
+
+    // 位图操作 (保持现有)
     void set_bit(int bitmap_block_start, int index);
     void clear_bit(int bitmap_block_start, int index);
-    bool test_bit(int bitmap_block_start, int index); // 检查位是否被设置
-    int find_free_bit(int bitmap_block_start, int total_bits, int min_allowed_index); // 查找第一个空闲位
+    bool test_bit(int bitmap_block_start, int index);
+    int find_free_bit(int bitmap_block_start, int total_bits, int min_allowed_index = 0);
     
-    // 文件系统状态枚举
-    enum class FSStatus 
-    { 
-        OK = 0,  
-        FAIL = -1, 
-        CORRUPT = -2 
-    };
-
-    // 构造函数 - 初始化虚拟磁盘
-    MiniFS();
-
-    // 块读写方法
-    void readBlock(int blockNum, void* buf); //读取一个数据块到内存缓冲区buf中
-    void writeBlock(int blockNum, const void* buf);
-
-    // 文件系统操作
-    void format();                            // 格式化文件系统，最重要初始化函数，准备disk作为文件系统来使用
-    FSStatus loadFS(const std::string& filename);  // 加载文件系统
-    int saveFS(const std::string& filename);       // 保存文件系统
-
-    // 目录操作
-    void listRoot();                          // 列出根目录内容
-    int checkFSConsistency();                 // 检查文件系统一致性
-    int mkdir(int parent_dir_inum, const char* name);  // 在指定父目录下创建新目录
-    void listDir(int dir_inum); // 列出指定目录的内容
-
-    //i结点和数据块分配
     int balloc();
     void bfree(int absolute_block_num);
     int ialloc(int16_t type);
     void ifree(int inum);
 
+    // 路径解析功能
+    int resolve_path_to_inum(const std::string& path, int base_inum = ROOT_INUM_CONST);
 
+
+private:
+    // 新增的私有方法
+    bool _get_inode(int inum, dinode& node_out);
+    int _lookup_in_directory(int dir_inum, const std::string& name);
+    std::vector<Byte> disk;
 };
 
-#endif // MINIFS_HPP
+#endif // MiniFS_HPP

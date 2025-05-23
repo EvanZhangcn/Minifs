@@ -1,8 +1,5 @@
 #include "minifs.hpp"
-#include <iostream>
-#include <fstream>
-#include <iomanip>
-#include <cstring>
+
 
 // 构造函数 - 初始化虚拟磁盘
 MiniFS::MiniFS() {
@@ -842,3 +839,260 @@ void MiniFS::ifree(int inum)
     // 更新位图
     clear_bit(INODE_BITMAP_BLOCK_START, inum);
 }
+
+
+
+
+
+
+
+
+/**
+ * @brief 读取指定 i-节点号对应的 i-节点信息
+ * 
+ * @param inum      [输入] 要查询的 i-节点号，必须满足 0 < inum < INODE_NUM
+ * @param node_out  [输出] 成功时存储读取到的 i-节点信息（dinode 结构体）
+ * 
+ * @return true     读取成功且 i-节点非空闲（node_out 包含有效数据）
+ * @return false    读取失败（无效 inum/块号、i-节点空闲或磁盘读取错误）
+ */
+// 辅助函数：读取i-节点信息
+bool MiniFS::_get_inode(int inum, dinode& node_out) {
+    if (inum <= 0 || inum >= INODE_NUM) 
+    { 
+        // 0号i-节点通常不用，或作为NIL
+        // std::cerr << "调试: _get_inode 无效的 i-节点号 " << inum << std::endl;
+        return false;
+    }
+    int block = INODE_START + (inum * INODE_SIZE) / BLOCK_SIZE;
+    int offset = (inum * INODE_SIZE) % BLOCK_SIZE;
+    
+    // 检查块号是否有效
+    if (block < 0 || block >= BLOCK_COUNT) 
+    {
+        std::cerr << "错误: _get_inode 计算出的块号 " << block << " 无效 (i-节点 " << inum << ")" << std::endl;
+        return false;
+    }
+
+    //采用buf，读出来block的数据到buf， 再用block + offset地址，访问出来的数据读到传进来的临时变量node_out
+    Byte buf[BLOCK_SIZE];
+    readBlock(block, buf); // readBlock 内部应有错误处理
+    std::memcpy(&node_out, buf + offset, sizeof(dinode));
+
+    if (node_out.type == T_FREE) {
+        // std::cerr << "调试: _get_inode i-节点 " << inum << " 是空闲的." << std::endl;
+        return false; 
+    }
+    return true;
+}
+
+
+/**
+ * @brief 在指定目录中查找指定名称的目录条目
+ * @param dir_inum  [输入] 要搜索的目录的i-节点号，必须是一个有效的目录i-节点
+ * @param name      [输入] 要查找的条目名称，长度不应超过DIRSIZ-1
+ * 
+ * @return int      成功时返回找到的条目的i-节点号(>0)
+ * @return INVALID_INUM_CONST (通常为0或-1) 表示未找到或出现错误，包括：
+ *                 - 目录i-节点无效或不是目录类型
+ *                 - 目录数据块无效
+ *                 - 条目不存在
+ * @note 名称比较是精确匹配，区分大小写
+ */
+int MiniFS::_lookup_in_directory(int dir_inum, const std::string& name) {
+     //重点就是：遍历dir_node的目录条目，进行名称匹配：
+     //   - 跳过无效条目（inum为0或INVALID_INUM_CONST）
+     //   - 精确比较名称（区分大小写）
+
+    dinode dir_node;
+    if (!_get_inode(dir_inum, dir_node)) 
+    {
+        // _get_inode 已经输出了错误（如果存在）
+        return INVALID_INUM_CONST;
+    }
+    //此时dir_node已经拿到了，进一步检测类型，地址，最后通过dir_node.addrs[0]访问数据块
+
+    if (dir_node.type != T_DIR) 
+    {
+        std::cerr << "错误: i-节点 " << dir_inum << " 不是一个目录 (类型: " << dir_node.type << ")." << std::endl;
+        return INVALID_INUM_CONST;
+    }
+
+    if (dir_node.addrs[0] == 0) 
+    { // 没有分配数据块
+        // std::cerr << "调试: 目录 " << dir_inum << " 没有分配数据块。" << std::endl;
+        return INVALID_INUM_CONST;
+    }
+    // 检查数据块号是否有效
+    if (dir_node.addrs[0] < DATA_START || dir_node.addrs[0] >= BLOCK_COUNT) 
+    {
+        std::cerr << "错误: 目录 " << dir_inum << " 的数据块号 " << dir_node.addrs[0] << " 无效。" << std::endl;
+        return INVALID_INUM_CONST;
+    }
+
+
+    Byte block_buf[BLOCK_SIZE];
+    readBlock(dir_node.addrs[0], block_buf);
+
+    int num_entries_possible = BLOCK_SIZE / sizeof(dirent); // 一个块最多能放多少个
+    int actual_entries = dir_node.size / sizeof(dirent); //实际放了多少个，检测下是否超出第一块
+    if (actual_entries > num_entries_possible) 
+    {
+        std::cerr << "警告: 目录 " << dir_inum << " 大小 (" << dir_node.size << ") 超出单个块容量，仅检查第一块。" << std::endl;
+        actual_entries = num_entries_possible;
+    }
+    
+    dirent* entries = reinterpret_cast<dirent*>(block_buf);
+
+    //遍历每一项，并比较name
+    for (int i = 0; i < actual_entries; ++i) {
+        // 确保比较的长度正确，并且 entries[i].name 是有效C字符串
+        if (entries[i].inum != 0 && entries[i].inum != INVALID_INUM_CONST) 
+        { // 假设0或INVALID_INUM表示空闲条目
+             // strncmp 比较安全，防止dirent.name未正确null结尾
+            if (strncmp(entries[i].name, name.c_str(), DIRSIZ -1) == 0 && name.length() == strlen(entries[i].name) ) 
+            {
+                 // Make sure entries[i].name is null-terminated for strlen
+                 // A safer way might be if DIRSIZ guarantees space for null terminator
+                 // and all names are stored null-terminated.
+                 // For this example, direct strcmp is often used assuming valid names.
+                 if (name == entries[i].name) 
+                 { // Simpler if names are guaranteed well-formed
+                    return entries[i].inum;
+                 }
+            }
+        }
+    }
+    return INVALID_INUM_CONST; // 未找到
+}
+
+// 将路径字符串解析到i-节点号
+//它接收一个字符串形式的路径(如 /home/user 或 docs/report.txt) 和  一个当前工作目录的 i-节点号(默认为根目录 1)
+//拿到最终访问该文件/文件夹的inum号
+int MiniFS::resolve_path_to_inum(const std::string& path, int base_inum) {
+    std::string current_path_str = path;
+    std::vector<std::string> components;//分割路径每两个/之间的内容, 这是个栈，存segment
+
+    // 1. 规范化路径：移除末尾的一个或者多个'/' (除非路径就是 "/")
+    // /home/user/ → /home/user
+    // /a//b/// → /a//b（只移除末尾的斜杠）
+    while (current_path_str.length() > 1 && current_path_str.back() == '/') 
+    {
+        current_path_str.pop_back();
+    }
+
+    //针对特殊情况：原始路径是 "///"，经过上面的while操作已经为空了，但是原始path不为空
+    if (current_path_str.empty() && !path.empty() && path[0] == '/') 
+    { 
+        current_path_str = "/";
+    }
+    
+    if (current_path_str.empty()) 
+    { 
+        // 如果原始路径为空，或处理后为空 (例如 "////" 且非根)
+        return path[0] == '/' ? ROOT_INUM_CONST : base_inum; // "" -> base_inum, "/" -> ROOT
+    }
+
+    if (current_path_str == "/") {
+        return ROOT_INUM_CONST;
+    }
+
+    // 2. 确定起始i-节点
+    int current_inum;
+    std::stringstream ss(current_path_str);
+    std::string segment;//存每一部分的分段
+
+    if (current_path_str[0] == '/') 
+    {
+        current_inum = ROOT_INUM_CONST;
+        //ss将字符串转化为流，配合getline指定分隔符，产生segment
+        std::getline(ss, segment, '/'); // 跳过第一个由'/'产生的空segment
+    } 
+    else 
+    {
+        current_inum = base_inum;
+    }
+
+    // 3. 分解路径组件
+    while (std::getline(ss, segment, '/')) 
+    {
+        // /a//b
+        if (!segment.empty()) 
+        { 
+            // 忽略因 "//" 产生的空组件
+            components.push_back(segment);
+        }
+    }
+
+    //对于命令 ls new_dir
+    // 情况：如果 components 为空且路径不是以 '/' 开头（即相对路径）
+    if (components.empty() && current_path_str[0] != '/') 
+    { 
+        // 检查路径是否非空且不包含 '/'（即单级相对路径，如 "my_dir"）
+        if (!current_path_str.empty() && current_path_str.find('/') == std::string::npos) {
+            // 将整个路径字符串作为唯一component入栈
+            components.push_back(current_path_str); 
+        }
+    }
+
+    // 4. 逐级解析
+    dinode current_node_obj; // 临时变量，用于临时存储i节点信息
+    for (const std::string& comp : components) 
+    {
+        if (comp.empty()) continue; //防一下：是否有空格被入栈components里面了
+        if (!_get_inode(current_inum, current_node_obj)) 
+        {
+            std::cerr << "路径解析错误: 无法读取 i-节点 " << current_inum << " (处理组件: '" << comp << "')" << std::endl;
+            return INVALID_INUM_CONST;
+        }
+
+        //检验类型是否为directory
+        if (current_node_obj.type != T_DIR) 
+        {
+            std::cerr << "路径解析错误: i-节点 " << current_inum << " 不是目录 (组件: '" << comp << "')" << std::endl;
+            return INVALID_INUM_CONST;
+        }
+
+
+        if (comp == ".") 
+        {
+            // 当前目录，i-节点号不变
+            continue;
+        } 
+        else if (comp == "..") 
+        {
+            // 父目录
+            // 查找 ".." 条目，它应该由 format 或 mkdir 创建
+            // 根目录的 ".." 指向根目录自身
+            int parent_inum = _lookup_in_directory(current_inum, "..");
+            //返回值有两种，parent_inum == INVALID_INUM_CONST 或者 正确的inum值
+            if (parent_inum == INVALID_INUM_CONST) {
+                std::cerr << "路径解析错误: 目录 " << current_inum << " 中未找到 '..' 条目。" << std::endl;
+                return INVALID_INUM_CONST;
+            }
+            current_inum = parent_inum;
+        } 
+        else 
+        {
+            // 普通目录/文件组件
+            int found_inum = _lookup_in_directory(current_inum, comp);
+            if (found_inum == INVALID_INUM_CONST) {
+                // std::cerr << "路径解析错误: 在目录 " << current_inum << " 中未找到 '" << comp << "'." << std::endl;
+                return INVALID_INUM_CONST; // Not found, return error
+            }
+            current_inum = found_inum;
+        }
+    }
+
+    // 最终的current_inum是结果，再验证一次它是否有效（非空闲）
+    if (current_inum != INVALID_INUM_CONST) {
+        if (!_get_inode(current_inum, current_node_obj)) {
+            // 可能指向一个已被释放的i-节点
+            return INVALID_INUM_CONST;
+        }
+    }
+    return current_inum;
+}
+
+
+

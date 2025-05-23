@@ -1,8 +1,17 @@
-#include "minifs.hpp"
+#include "fs_tests.hpp"
+#include "shell_utils.hpp"
 
 
 // 构造函数 - 初始化虚拟磁盘
 MiniFS::MiniFS() {
+    // 初始化文件描述符表
+    for (int i = 0; i < MAX_OPEN_FILES; i++) {
+        fd_table[i].is_used = false;
+        fd_table[i].inum = -1;
+        fd_table[i].position = 0;
+        fd_table[i].mode = 0;
+    }
+    
     try {
         // 变量，用于确保错误消息清晰可见
         size_t expected_size = static_cast<size_t>(BLOCK_SIZE) * BLOCK_COUNT;
@@ -52,9 +61,6 @@ MiniFS::MiniFS() {
 // 块读取方法
 void MiniFS::readBlock(int blockNum, void* buf) 
 {
-    std::cout << "【DEBUG】开始读取块 " << blockNum << std::endl;
-    std::cout.flush(); // 确保输出被刷新
-    
     try {
         // 增加安全检查，确保不会越界访问
         if (blockNum < 0 || blockNum >= BLOCK_COUNT) {
@@ -64,12 +70,6 @@ void MiniFS::readBlock(int blockNum, void* buf)
             std::memset(buf, 0, BLOCK_SIZE);
             return;
         }
-        
-        // 检查 disk 向量
-        std::cout << "【DEBUG】检查 disk 向量: size=" << disk.size() 
-                << ", capacity=" << disk.capacity() 
-                << ", empty=" << (disk.empty() ? "true" : "false") << std::endl;
-        std::cout.flush();
         
         if (disk.empty()) {
             std::cerr << "错误: disk 向量为空，无法读取任何数据" << std::endl;
@@ -94,17 +94,9 @@ void MiniFS::readBlock(int blockNum, void* buf)
             return;
         }
         
-        // 计算源地址
+        // 计算源地址并执行复制
         const void* src_addr = disk.data() + blockNum * BLOCK_SIZE;
-        std::cout << "【DEBUG】源地址: " << src_addr << std::endl;
-        std::cout.flush();
-        
-        // 执行复制
-        std::cout << "【DEBUG】执行复制: 从 " << src_addr << " 到 " << buf << ", 大小=" << BLOCK_SIZE << " 字节" << std::endl;
-        std::cout.flush();
         std::memcpy(buf, src_addr, BLOCK_SIZE);
-        std::cout << "【DEBUG】块 " << blockNum << " 读取成功" << std::endl;
-        std::cout.flush();
     }
     catch (const std::exception& e) {
         std::cerr << "readBlock 发生异常: " << e.what() << std::endl;
@@ -856,7 +848,7 @@ void MiniFS::ifree(int inum)
  * @return true     读取成功且 i-节点非空闲（node_out 包含有效数据）
  * @return false    读取失败（无效 inum/块号、i-节点空闲或磁盘读取错误）
  */
-// 辅助函数：读取i-节点信息
+// 辅助函数：读取i-节点信息 (现在改为public)
 bool MiniFS::_get_inode(int inum, dinode& node_out) {
     if (inum <= 0 || inum >= INODE_NUM) 
     { 
@@ -1024,7 +1016,7 @@ int MiniFS::resolve_path_to_inum(const std::string& path, int base_inum) {
         }
     }
 
-    //对于命令 ls new_dir
+    //对于命令 ls new_dir，  create 文件名
     // 情况：如果 components 为空且路径不是以 '/' 开头（即相对路径）
     if (components.empty() && current_path_str[0] != '/') 
     { 
@@ -1096,3 +1088,631 @@ int MiniFS::resolve_path_to_inum(const std::string& path, int base_inum) {
 
 
 
+
+/**
+ * @brief 在指定路径创建一个新的普通文件。
+ * @return int 成功时返回0，失败时返回负数错误码。
+ * -1: 通用错误
+ * INVALID_INUM_CONST: 路径无效或父目录不存在
+ * -2: 路径中某一部分不是目录
+ * -3: 文件已存在
+ * -4: i-节点分配失败
+ * -5: 父目录写入失败
+ */
+int MiniFS::create(int parent_dir_inum, const char* name)
+{    
+    // 检查文件名长度
+    if (strlen(name) >= DIRSIZ) {
+        std::cerr << "错误: 文件名称过长 (最大长度: " << DIRSIZ-1 << " 字符)" << std::endl;
+        return INVALID_INUM_CONST;
+    }
+
+    // 1. 读取父目录i-节点
+    int parent_block = INODE_START + (parent_dir_inum * INODE_SIZE) / BLOCK_SIZE;
+    int parent_offset = (parent_dir_inum * INODE_SIZE) % BLOCK_SIZE;
+    
+    Byte buf[BLOCK_SIZE];
+    readBlock(parent_block, buf);
+    dinode parent_inode;
+    std::memcpy(&parent_inode, buf + parent_offset, sizeof(dinode));
+    
+    // 确认父节点是一个目录
+    if (parent_inode.type != T_DIR) {
+        std::cerr << "错误: 父i-节点不是目录类型 (type = " << parent_inode.type << ")" << std::endl;
+        return INVALID_INUM_CONST;
+    }
+    
+    // 2. 检查同名冲突
+    int entries_count = parent_inode.size / sizeof(dirent);
+    dirent entries[BLOCK_SIZE / sizeof(dirent)];
+    readBlock(parent_inode.addrs[0], entries);  // 简化: 假设目录项都在第一个数据块
+    
+    for (int i = 0; i < entries_count; i++) {
+        if (std::strcmp(entries[i].name, name) == 0) {
+            std::cerr << "错误: 父目录中已存在同名项 '" << name << "'" << std::endl;
+            return INVALID_INUM_CONST;
+        }
+    }
+    
+    // 3. 分配新文件的i-节点
+    int file_inum = ialloc(T_FILE);
+    if (file_inum == INVALID_INUM_CONST) {
+        std::cerr << "错误: 无法分配i-节点" << std::endl;
+        return INVALID_INUM_CONST;
+    }
+    
+    // 4. 分配新文件的第一个数据块
+    int file_data_block = balloc();
+    if (file_data_block == -1) {
+        std::cerr << "错误: 无法分配数据块" << std::endl;
+        ifree(file_inum); // 释放之前分配的i-节点
+        return INVALID_INUM_CONST;
+    }
+    
+    // 5. 初始化新文件的i-节点
+    int file_block = INODE_START + (file_inum * INODE_SIZE) / BLOCK_SIZE;
+    int file_offset = (file_inum * INODE_SIZE) % BLOCK_SIZE;
+    
+    readBlock(file_block, buf);
+    dinode* file_inode = reinterpret_cast<dinode*>(buf + file_offset);
+    
+    file_inode->type = T_FILE;
+    file_inode->size = 0;  // 新创建的文件大小为0
+    file_inode->nlink = 1; // 只有父目录的一个链接
+    file_inode->addrs[0] = file_data_block;
+    writeBlock(file_block, buf);
+    
+    // 6. 初始化文件数据块（全为0）
+    // 实际上 balloc 已经做了数据块清零操作，这里可以不需要
+    // Byte zero_buf[BLOCK_SIZE] = {0};
+    // writeBlock(file_data_block, zero_buf);
+    
+    // 7. 在父目录中添加新文件条目
+    dirent new_entry;
+    new_entry.inum = file_inum;
+    std::strcpy(new_entry.name, name);//名字赋值
+    entries[entries_count] = new_entry; // 这行是必要的，添加新目录项
+    
+    // 8. 写回更新后的父目录数据
+    writeBlock(parent_inode.addrs[0], entries);
+    
+    // 9. 写回更新后的父目录i-节点（只更新大小，不增加链接数）
+    parent_inode.size += sizeof(dirent);  // 增加父目录大小
+    std::memcpy(buf + parent_offset, &parent_inode, sizeof(dinode));
+    writeBlock(parent_block, buf);
+    std::cout << "成功创建文件: " << name << " (inum: " << file_inum << ")" << std::endl;
+    return file_inum;
+}
+
+
+
+// 打开文件函数
+// parent_dir_inum: 父目录i-节点号
+// name: 文件名
+// flags: 打开模式，支持 O_RDONLY, O_WRONLY, O_RDWR, O_CREATE
+// 返回值: 成功返回文件描述符，失败返回-1
+int MiniFS::open(int parent_dir_inum, const char* name, int flags) 
+{
+    std::cout << "尝试打开文件: " << name << " (parent inum: " << parent_dir_inum << ")" << std::endl;
+
+    // 检查文件名长度
+    if (strlen(name) >= DIRSIZ) {
+        std::cerr << "错误: 文件名称过长 (最大长度: " << DIRSIZ-1 << " 字符)" << std::endl;
+        return -1;
+    }
+
+    // 1. 读取父目录i-节点
+    int parent_block = INODE_START + (parent_dir_inum * INODE_SIZE) / BLOCK_SIZE;
+    int parent_offset = (parent_dir_inum * INODE_SIZE) % BLOCK_SIZE;
+    
+    Byte buf[BLOCK_SIZE];
+    readBlock(parent_block, buf);
+    dinode parent_inode;
+    std::memcpy(&parent_inode, buf + parent_offset, sizeof(dinode));
+    
+    // 确认父节点是一个目录
+    if (parent_inode.type != T_DIR) {
+        std::cerr << "错误: 父i-节点不是目录类型 (type = " << parent_inode.type << ")" << std::endl;
+        return -1;
+    }
+    
+    // 2. 在父目录中查找文件
+    int entries_count = parent_inode.size / sizeof(dirent);
+    dirent entries[BLOCK_SIZE / sizeof(dirent)];
+    readBlock(parent_inode.addrs[0], entries);  // 简化: 假设目录项都在第一个数据块
+    
+    int file_inum = -1;
+    for (int i = 0; i < entries_count; i++) {
+        if (std::strcmp(entries[i].name, name) == 0) {
+            file_inum = entries[i].inum;
+            break;
+        }
+    }
+    
+    // 3. 如果文件不存在且没有设置O_CREATE标志，则返回错误
+    if (file_inum == -1) {
+        if (!(flags & O_CREATE)) {
+            std::cerr << "错误: 文件不存在且未设置创建标志" << std::endl;
+            return -1;
+        } else 
+        {
+            // 创建文件
+            file_inum = create(parent_dir_inum, name);
+            if (file_inum == INVALID_INUM_CONST) {
+                std::cerr << "错误: 无法创建文件" << std::endl;
+                return -1;
+            }
+        }
+    }
+    
+    // 4. 检查文件类型
+    int file_block = INODE_START + (file_inum * INODE_SIZE) / BLOCK_SIZE;
+    int file_offset = (file_inum * INODE_SIZE) % BLOCK_SIZE;
+    
+    readBlock(file_block, buf);
+    dinode file_inode;
+    std::memcpy(&file_inode, buf + file_offset, sizeof(dinode));
+    
+    if (file_inode.type != T_FILE) {
+        std::cerr << "错误: 不是一个文件类型 (type = " << file_inode.type << ")" << std::endl;
+        return -1;
+    }
+    
+    // 5. 分配文件描述符
+    int fd = -1;
+    for (int i = 0; i < MAX_OPEN_FILES; i++) {
+        if (!fd_table[i].is_used) {
+            fd = i;
+            break;
+        }
+    }
+    
+    if (fd == -1) {
+        std::cerr << "错误: 文件描述符表已满" << std::endl;
+        return -1;
+    }
+    
+    // 6. 设置文件描述符
+    fd_table[fd].inum = file_inum;
+    fd_table[fd].mode = flags & (O_RDONLY | O_WRONLY | O_RDWR); // 仅保留读写模式位，这里顺带保存了O_CREATE位
+    fd_table[fd].position = 0; // 从文件开始处读写
+    fd_table[fd].is_used = true;
+    
+    std::cout << "成功打开文件: " << name << " (fd: " << fd << ", inum: " << file_inum << ")" << std::endl;
+    return fd;
+}
+
+// 关闭文件函数
+// fd: 要关闭的文件描述符
+// 返回值: 成功返回0，失败返回-1
+int MiniFS::close(int fd)
+{
+    // 检查文件描述符是否有效
+    if (fd < 0 || fd >= MAX_OPEN_FILES) {
+        std::cerr << "错误: 无效的文件描述符 " << fd << std::endl;
+        return -1;
+    }
+    
+    // 检查文件描述符是否在使用中
+    if (!fd_table[fd].is_used) {
+        std::cerr << "错误: 文件描述符 " << fd << " 未使用" << std::endl;
+        return -1;
+    }
+    
+    // 关闭文件（标记为未使用）
+    fd_table[fd].is_used = false;
+    std::cout << "成功关闭文件描述符 " << fd << std::endl;
+    
+    return 0;
+}
+
+// 读取文件函数
+// fd: 文件描述符
+// buf: 读取数据的缓冲区
+// count: 要读取的最大字节数
+// 返回值: 成功返回实际读取的字节数，失败返回-1
+//拿到文件描述符，得到关联节点inum，就有了inum->address
+int MiniFS::read(int fd, void* buf, int count)
+{
+    // 检查文件描述符是否有效
+    if (fd < 0 || fd >= MAX_OPEN_FILES) {
+        std::cerr << "错误: 无效的文件描述符 " << fd << std::endl;
+        return -1;
+    }
+    
+    // 检查文件描述符是否在使用中
+    if (!fd_table[fd].is_used) {
+        std::cerr << "错误: 文件描述符 " << fd << " 未使用" << std::endl;
+        return -1;
+    }
+    
+    // 检查是否有读权限
+    if (!(fd_table[fd].mode & (O_RDONLY | O_RDWR))) {
+        std::cerr << "错误: 文件描述符 " << fd << " 没有读权限" << std::endl;
+        return -1;
+    }
+    
+    // 获取关联的i-节点
+    int inum = fd_table[fd].inum;
+    int inode_block = INODE_START + (inum * INODE_SIZE) / BLOCK_SIZE;
+    int inode_offset = (inum * INODE_SIZE) % BLOCK_SIZE;
+    
+    Byte block_buf[BLOCK_SIZE];
+    readBlock(inode_block, block_buf);
+    dinode file_inode;
+    std::memcpy(&file_inode, block_buf + inode_offset, sizeof(dinode));
+    
+    // 检查文件大小
+    int file_size = file_inode.size;
+    
+    // 修改：始终从文件开头读取，但仍保留文件位置用于写操作
+    // 原来是：int bytes_available = file_size - fd_table[fd].position;
+    // 修改为总是从文件开头读取指定数量的字节
+    int bytes_available = file_size; // 从文件开头读取
+    
+    if (bytes_available <= 0) 
+    {
+        // 文件为空
+        return 0;
+    }
+    
+    // 确定要读取的字节数
+    int bytes_to_read = std::min(bytes_available, count);
+    int bytes_read = 0;
+    
+    // 读取数据,用字符指针逐个读取
+    char* dest_buf = static_cast<char*>(buf);
+    
+    // 修改：总是从文件开头读取，不使用文件位置
+    // int curr_pos = fd_table[fd].position;
+    int curr_pos = 0; // 从文件开头开始
+    
+    while (bytes_to_read > 0) {
+        // 计算当前位置对应的数据块索引和偏移量
+        int block_index = curr_pos / BLOCK_SIZE;
+        int block_offset = curr_pos % BLOCK_SIZE;
+        
+        // 确保数据块索引合法
+        if (block_index >= 8) {
+            std::cerr << "错误: 文件读取超出支持的最大文件大小" << std::endl;
+            break;
+        }
+        
+        // 获取数据块
+        int data_block_num = file_inode.addrs[block_index];
+        if (data_block_num == 0) {
+            // 没有分配的数据块，可能是文件有空洞
+            break;
+        }
+        
+        // 读取数据块
+        Byte data_buf[BLOCK_SIZE];
+        readBlock(data_block_num, data_buf);
+        
+        // 计算在当前块中可以读取的字节数
+        int block_bytes = std::min(bytes_to_read, BLOCK_SIZE - block_offset);
+        
+        // 复制数据
+        std::memcpy(dest_buf + bytes_read, data_buf + block_offset, block_bytes);
+        
+        // 更新计数和位置
+        bytes_read += block_bytes;
+        bytes_to_read -= block_bytes;
+        curr_pos += block_bytes;
+    }
+    
+    // 修改：不更新文件位置，position仅用于写入操作
+    // fd_table[fd].position += bytes_read;
+    
+    std::cout << "成功从文件描述符 " << fd << " 读取 " << bytes_read << " 字节" << std::endl;
+    //返回读取的字节数
+    return bytes_read;
+}
+
+// 写入文件函数
+// fd: 文件描述符
+// buf: 要写入的数据
+// count: 要写入的字节数
+// 返回值: 成功返回实际写入的字节数，失败返回-1
+int MiniFS::write(int fd, const void* buf, int count)
+{
+    // 检查文件描述符是否有效
+    if (fd < 0 || fd >= MAX_OPEN_FILES) {
+        std::cerr << "错误: 无效的文件描述符 " << fd << std::endl;
+        return -1;
+    }
+    
+    // 检查文件描述符是否在使用中
+    if (!fd_table[fd].is_used) {
+        std::cerr << "错误: 文件描述符 " << fd << " 未使用" << std::endl;
+        return -1;
+    }
+    
+    // 检查是否有写权限
+    if (!(fd_table[fd].mode & (O_WRONLY | O_RDWR))) {
+        std::cerr << "错误: 文件描述符 " << fd << " 没有写权限" << std::endl;
+        return -1;
+    }
+    
+    // 获取关联的i-节点,拿到inum，下一步定位当前数据块和块偏移
+    int inum = fd_table[fd].inum;
+    int inode_block = INODE_START + (inum * INODE_SIZE) / BLOCK_SIZE;
+    int inode_offset = (inum * INODE_SIZE) % BLOCK_SIZE;
+    
+    Byte block_buf[BLOCK_SIZE];
+    readBlock(inode_block, block_buf);
+    dinode file_inode;
+    std::memcpy(&file_inode, block_buf + inode_offset, sizeof(dinode));
+    
+    // 如果要写入的数据超出文件大小，可能需要扩展文件
+    int target_size = fd_table[fd].position + count;
+    int needed_blocks = (target_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    
+    if (needed_blocks > 8) {
+        std::cerr << "错误: 所需的块数 " << needed_blocks << " 超出了支持的最大值 8" << std::endl;
+        // 只写入能够容纳的数据
+        needed_blocks = 8;
+        count = needed_blocks * BLOCK_SIZE - fd_table[fd].position;
+    }
+    
+    // 分配必要的数据块
+    int current_blocks = (file_inode.size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    for (int i = current_blocks; i < needed_blocks; i++) {
+        int new_block = balloc();
+        if (new_block == -1) {
+            std::cerr << "错误: 无法分配数据块，磁盘空间不足" << std::endl;
+            // 只写入已分配的块
+            needed_blocks = i;
+            count = (i * BLOCK_SIZE) - fd_table[fd].position;
+            if (count <= 0) {
+                return 0; // 无法写入任何数据
+            }
+            break;
+        }
+        file_inode.addrs[i] = new_block;
+    }
+    
+    // 开始写入数据
+    int bytes_written = 0;
+    int curr_pos = fd_table[fd].position;
+    const char* src_buf = static_cast<const char*>(buf);
+    
+    while (bytes_written < count) {
+        // 计算当前位置对应的数据块索引和偏移量
+        int block_index = curr_pos / BLOCK_SIZE;
+        int block_offset = curr_pos % BLOCK_SIZE;
+        
+        // 获取数据块
+        int data_block_num = file_inode.addrs[block_index];
+        
+        // 读取当前块内容
+        Byte data_buf[BLOCK_SIZE];
+        readBlock(data_block_num, data_buf);
+        
+        // 计算在当前块中可以写入的字节数
+        int block_bytes = std::min(count - bytes_written, BLOCK_SIZE - block_offset);
+        
+        // 复制数据
+        std::memcpy(data_buf + block_offset, src_buf + bytes_written, block_bytes);
+        
+        // 写回数据块
+        writeBlock(data_block_num, data_buf);
+        
+        // 更新计数和位置
+        bytes_written += block_bytes;
+        curr_pos += block_bytes;
+    }
+    
+    // 更新文件位置
+    fd_table[fd].position += bytes_written;
+    
+    // 更新文件大小
+    if (target_size > file_inode.size) {
+        file_inode.size = target_size;
+    }
+    
+    // 更新i-节点
+    std::memcpy(block_buf + inode_offset, &file_inode, sizeof(dinode));
+    writeBlock(inode_block, block_buf);
+    
+    std::cout << "成功向文件描述符 " << fd << " 写入 " << bytes_written << " 字节" << std::endl;
+    return bytes_written;
+}
+
+// 删除目录函数
+// parent_dir_inum: 父目录的i-节点号
+// name: 要删除的目录名
+// 返回值: 成功返回0，失败返回-1
+int MiniFS::rmdir(int parent_dir_inum, const char* name)
+{
+    std::cout << "开始删除目录: " << name << " (parent inum: " << parent_dir_inum << ")" << std::endl;
+    
+    if (strlen(name) >= DIRSIZ) {
+        std::cerr << "错误: 目录名称过长 (最大长度: " << DIRSIZ-1 << " 字符)" << std::endl;
+        return -1;
+    }
+
+    // 1. 读取父目录i-节点
+    int parent_block = INODE_START + (parent_dir_inum * INODE_SIZE) / BLOCK_SIZE;
+    int parent_offset = (parent_dir_inum * INODE_SIZE) % BLOCK_SIZE;
+    
+    Byte buf[BLOCK_SIZE];
+    readBlock(parent_block, buf);
+    dinode parent_inode;
+    std::memcpy(&parent_inode, buf + parent_offset, sizeof(dinode));
+    
+    // 确认父节点是一个目录
+    if (parent_inode.type != T_DIR) {
+        std::cerr << "错误: 父i-节点不是目录类型 (type = " << parent_inode.type << ")" << std::endl;
+        return -1;
+    }
+    
+    // 2. 在父目录中查找目标目录的i-节点号
+    int entries_count = parent_inode.size / sizeof(dirent);
+    dirent entries[BLOCK_SIZE / sizeof(dirent)];
+    readBlock(parent_inode.addrs[0], entries);
+    
+    int target_index = -1;
+    int target_inum = -1;
+    
+    for (int i = 0; i < entries_count; i++) {
+        if (std::strcmp(entries[i].name, name) == 0) {
+            target_index = i;
+            target_inum = entries[i].inum;
+            break;
+        }
+    }
+    
+    if (target_index == -1 || target_inum == -1) {
+        std::cerr << "错误: 目录 '" << name << "' 不存在" << std::endl;
+        return -1;
+    }
+    
+    // 3. 读取要删除的目录的i-节点
+    int target_block = INODE_START + (target_inum * INODE_SIZE) / BLOCK_SIZE;
+    int target_offset = (target_inum * INODE_SIZE) % BLOCK_SIZE;
+    
+    readBlock(target_block, buf);
+    dinode target_inode;
+    std::memcpy(&target_inode, buf + target_offset, sizeof(dinode));
+    
+    // 确认目标是一个目录
+    if (target_inode.type != T_DIR) {
+        std::cerr << "错误: 目标 '" << name << "' 不是一个目录 (type = " << target_inode.type << ")" << std::endl;
+        return -1;
+    }
+    
+    // 4. 检查目录是否为空（只包含 . 和 ..）
+    if (target_inode.size > 2 * sizeof(dirent)) {
+        dirent dir_entries[BLOCK_SIZE / sizeof(dirent)];
+        readBlock(target_inode.addrs[0], dir_entries);
+        int dir_entries_count = target_inode.size / sizeof(dirent);
+        
+        // 只有 . 和 .. 时才能删除
+        if (dir_entries_count > 2) {
+            std::cerr << "错误: 目录 '" << name << "' 不为空，包含 " << dir_entries_count - 2 << " 个项目" << std::endl;
+            return -1;
+        }
+    }
+    
+    // 5. 从父目录中移除该条目 (通过将最后一个条目移到被删除条目的位置)
+    if (target_index < entries_count - 1) {
+        entries[target_index] = entries[entries_count - 1];
+    }
+    parent_inode.size -= sizeof(dirent);
+    parent_inode.nlink--; // 减少父目录的链接数
+    
+    // 6. 释放目录的数据块
+    for (int i = 0; i < 8; i++) {
+        if (target_inode.addrs[i] != 0) {
+            bfree(target_inode.addrs[i]);
+        }
+    }
+    
+    // 7. 释放目录的i-节点
+    ifree(target_inum);
+    
+    // 8. 更新父目录的i-节点和数据
+    writeBlock(parent_inode.addrs[0], entries);
+    std::memcpy(buf + parent_offset, &parent_inode, sizeof(dinode));
+    writeBlock(parent_block, buf);
+    
+    std::cout << "成功删除目录: " << name << std::endl;
+    return 0;
+}
+
+// 删除文件函数
+// parent_dir_inum: 父目录的i-节点号
+// name: 要删除的文件名
+// 返回值: 成功返回0，失败返回-1
+int MiniFS::rm(int parent_dir_inum, const char* name)
+{
+    std::cout << "开始删除文件: " << name << " (parent inum: " << parent_dir_inum << ")" << std::endl;
+    
+    if (strlen(name) >= DIRSIZ) {
+        std::cerr << "错误: 文件名称过长 (最大长度: " << DIRSIZ-1 << " 字符)" << std::endl;
+        return -1;
+    }
+
+    // 1. 读取父目录i-节点
+    int parent_block = INODE_START + (parent_dir_inum * INODE_SIZE) / BLOCK_SIZE;
+    int parent_offset = (parent_dir_inum * INODE_SIZE) % BLOCK_SIZE;
+    
+    Byte buf[BLOCK_SIZE];
+    readBlock(parent_block, buf);
+    dinode parent_inode;
+    std::memcpy(&parent_inode, buf + parent_offset, sizeof(dinode));
+    
+    // 确认父节点是一个目录
+    if (parent_inode.type != T_DIR) {
+        std::cerr << "错误: 父i-节点不是目录类型 (type = " << parent_inode.type << ")" << std::endl;
+        return -1;
+    }
+    
+    // 2. 在父目录中查找目标文件的i-节点号
+    int entries_count = parent_inode.size / sizeof(dirent);
+    dirent entries[BLOCK_SIZE / sizeof(dirent)];
+    readBlock(parent_inode.addrs[0], entries);
+    
+    int target_index = -1;
+    int target_inum = -1;
+    
+    for (int i = 0; i < entries_count; i++) {
+        if (std::strcmp(entries[i].name, name) == 0) {
+            target_index = i;
+            target_inum = entries[i].inum;
+            break;
+        }
+    }
+    
+    if (target_index == -1 || target_inum == -1) {
+        std::cerr << "错误: 文件 '" << name << "' 不存在" << std::endl;
+        return -1;
+    }
+    
+    // 3. 读取要删除的文件i-节点
+    int target_block = INODE_START + (target_inum * INODE_SIZE) / BLOCK_SIZE;
+    int target_offset = (target_inum * INODE_SIZE) % BLOCK_SIZE;
+    
+    readBlock(target_block, buf);
+    dinode target_inode;
+    std::memcpy(&target_inode, buf + target_offset, sizeof(dinode));
+    
+    // 确认目标是一个文件
+    if (target_inode.type != T_FILE) {
+        std::cerr << "错误: 目标 '" << name << "' 不是一个文件 (type = " << target_inode.type << ")" << std::endl;
+        return -1;
+    }
+    
+    // 4. 检查该文件是否正在被使用
+    for (int i = 0; i < MAX_OPEN_FILES; i++) {
+        if (fd_table[i].is_used && fd_table[i].inum == target_inum) {
+            std::cerr << "错误: 文件 '" << name << "' 正在被文件描述符 " << i << " 使用中" << std::endl;
+            return -1;
+        }
+    }
+    
+    // 5. 从父目录中移除该文件条目
+    if (target_index < entries_count - 1) {
+        entries[target_index] = entries[entries_count - 1];
+    }
+    parent_inode.size -= sizeof(dirent);
+    
+    // 6. 释放文件的数据块
+    for (int i = 0; i < 8; i++) {
+        if (target_inode.addrs[i] != 0) {
+            bfree(target_inode.addrs[i]);
+        }
+    }
+    
+    // 7. 释放文件的i-节点
+    ifree(target_inum);
+    
+    // 8. 更新父目录的i-节点和数据
+    writeBlock(parent_inode.addrs[0], entries);
+    std::memcpy(buf + parent_offset, &parent_inode, sizeof(dinode));
+    writeBlock(parent_block, buf);
+    
+    std::cout << "成功删除文件: " << name << std::endl;
+    return 0;
+}

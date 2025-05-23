@@ -9,6 +9,7 @@
 #include <memory>
 #include <cstring>
 #include <sstream>
+#include "user.hpp" // 添加用户管理相关头文件
 
 typedef unsigned char Byte;
 //位图块定义
@@ -69,8 +70,13 @@ struct dirent {
 // 文件系统类
 class MiniFS {
 public:
-    enum class FSStatus { OK, FAIL, CORRUPT, NOT_FOUND };
+    static const int O_RDONLY = 0x0001; // 只读  对应01
+    static const int O_WRONLY = 0x0002; // 只写  对应10
+    static const int O_RDWR   = 0x0003; // 读写 (O_RDONLY | O_WRONLY)  对应00
+    static const int O_CREATE = 0x0100; // 如果不存在则创建
 
+
+    enum class FSStatus { OK, FAIL, CORRUPT, NOT_FOUND };
     static const int ROOT_INUM_CONST = 1; // 根目录的i-节点号通常约定为1
     static const int INVALID_INUM_CONST = -1; // 表示无效或未找到的i-节点号
 
@@ -99,13 +105,69 @@ public:
 
     // 路径解析功能
     int resolve_path_to_inum(const std::string& path, int base_inum = ROOT_INUM_CONST);
+    bool _get_inode(int inum, dinode& node_out);
+    int _lookup_in_directory(int dir_inum, const std::string& name);    //create
+    
+    
+    // 文件描述符结构体
+    struct file_descriptor {
+        int inum;          // 关联的i-节点号
+        int mode;          // 打开模式(O_RDONLY, O_WRONLY, O_RDWR)
+        int position;      // 当前文件读写位置
+        bool is_used;      // 文件描述符是否在使用中
+    };
+    
+    // 文件操作函数
+    int create(int parent_dir_inum, const char* name);
+    int open(int parent_dir_inum, const char* name, int flags);
+    int close(int fd);
+    int read(int fd, void* buf, int count);
+    int write(int fd, const void* buf, int count);
 
+    // 删除目录
+    int rmdir(int parent_dir_inum, const char* name);
+    
+    // 删除文件
+    int rm(int parent_dir_inum, const char* name);
+
+    // 用户管理相关方法
+    UserManager userManager;  // 用户管理器
+
+    // 用户登录
+    bool login(const std::string& username, const std::string& password) {
+        return userManager.login(username, password);
+    }
+
+    // 用户登出
+    bool logout() {
+        return userManager.logout();
+    }
+
+    // 添加用户
+    bool addUser(const std::string& username, const std::string& password, int uid, int gid) {
+        return userManager.addUser(username, password, uid, gid);
+    }
+
+    // 列出所有用户
+    void listUsers() {
+        userManager.listUsers();
+    }
+
+    // 检查当前是否有用户登录
+    bool isLoggedIn() const {
+        return userManager.isLoggedIn();
+    }
+
+    // 获取当前用户
+    const User& getCurrentUser() const {
+        return userManager.getCurrentUser();
+    }
 
 private:
-    // 新增的私有方法
-    bool _get_inode(int inum, dinode& node_out);
-    int _lookup_in_directory(int dir_inum, const std::string& name);
     std::vector<Byte> disk;
+    // 文件描述符表
+    static const int MAX_OPEN_FILES = 16;
+    file_descriptor fd_table[MAX_OPEN_FILES];
 };
 
 #endif // MiniFS_HPP

@@ -9,13 +9,12 @@
                 "-g",
                 "minifs.cpp",
                 "main.cpp",
+                "fs_tests.cpp",
+                "shell_utils.cpp",
                 "-o",
                 "minifs.exe"
             ],
-            "group": "build",
-            "problemMatcher": [
-                "$gcc"
-            ]
-        }
+            "group": "build"
+        },
     ]
 }

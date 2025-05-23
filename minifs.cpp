@@ -1,9 +1,10 @@
 #include "fs_tests.hpp"
 #include "shell_utils.hpp"
+#include "user.hpp"  // 在实现文件中引入user.hpp
 
 
 // 构造函数 - 初始化虚拟磁盘
-MiniFS::MiniFS() {
+MiniFS::MiniFS() : userManager() { // 在构造函数初始化列表中初始化 userManager,这里因为没初始化一直报错，一定要初始化
     // 初始化文件描述符表
     for (int i = 0; i < MAX_OPEN_FILES; i++) {
         fd_table[i].is_used = false;
@@ -56,6 +57,11 @@ MiniFS::MiniFS() {
     } catch (const std::exception& e) {
         std::cerr << "虚拟磁盘初始化时发生异常: " << e.what() << std::endl;
     }
+}
+
+// MiniFS 析构函数
+MiniFS::~MiniFS() {
+    // userManager 作为 MiniFS 的直接成员，其析构函数会自动调用，无需手动 delete
 }
 
 // 块读取方法
@@ -317,9 +323,6 @@ void MiniFS::format()
 
 
 }
-
-
-
 
 /**
  * @param parent_dir_inum 父目录的i-节点号
@@ -832,13 +835,6 @@ void MiniFS::ifree(int inum)
     clear_bit(INODE_BITMAP_BLOCK_START, inum);
 }
 
-
-
-
-
-
-
-
 /**
  * @brief 读取指定 i-节点号对应的 i-节点信息
  * 
@@ -1085,9 +1081,6 @@ int MiniFS::resolve_path_to_inum(const std::string& path, int base_inum) {
     }
     return current_inum;
 }
-
-
-
 
 /**
  * @brief 在指定路径创建一个新的普通文件。
@@ -1715,4 +1708,67 @@ int MiniFS::rm(int parent_dir_inum, const char* name)
     
     std::cout << "成功删除文件: " << name << std::endl;
     return 0;
+}
+
+// 登录函数
+bool MiniFS::login(const std::string& username, const std::string& password) {
+    return userManager.login(username, password); 
+}
+
+// 登出函数
+bool MiniFS::logout() {
+    return userManager.logout();
+}
+
+// 添加用户
+bool MiniFS::addUser(const std::string& username, const std::string& password, int uid, int gid) {
+    return userManager.addUser(username, password, uid, gid);
+}
+
+// 列出用户
+void MiniFS::listUsers() {
+    userManager.listUsers();
+}
+
+// 检查是否登录
+bool MiniFS::isLoggedIn() const {
+    return userManager.isLoggedIn();
+}
+
+// 获取当前用户
+const User& MiniFS::getCurrentUser() const {
+    return userManager.getCurrentUser();
+}
+
+// 保存用户数据
+bool MiniFS::saveUserData() {
+    return userManager.saveUsersToFS(this); // 将 this 指针传递给 UserManager
+}
+
+// 加载用户数据
+bool MiniFS::loadUserData() {
+    return userManager.loadUsersFromFS(this); // 将 this 指针传递给 UserManager
+}
+
+// 格式化时保留用户
+void MiniFS::formatWithUserPreservation() {
+    // 1. 保存当前用户数据
+    std::string users_data_str = userManager.getUsersDataString();
+
+    // 2. 执行标准格式化
+    format(); // 这会清除所有数据，包括用户数据文件（如果存在）
+
+    // 3. 恢复用户数据
+    if (!userManager.parseUsersDataString(users_data_str)) {
+        std::cerr << "警告: 格式化后恢复用户数据失败。正在使用默认用户配置。" << std::endl;
+        // 如果解析失败，确保至少有 root 用户
+        userManager.addUser("root", "root", 0, 0);
+    }
+    // 重新保存用户数据到新的文件系统结构中
+    saveUserData();
+}
+
+// 清空用户数据（用于测试）
+void MiniFS::clearUserData() {
+    userManager.clearUsers();
 }

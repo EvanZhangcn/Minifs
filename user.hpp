@@ -5,7 +5,12 @@
 #include <vector>
 #include <unordered_map>
 #include <iostream>
+#include <iomanip> // 添加 iomanip 以支持 std::setw
 #include <cstring>
+#include <sstream>
+
+// 前向声明 MiniFS 类，解决循环引用问题
+class MiniFS;
 
 // 定义用户类
 class User {
@@ -32,6 +37,9 @@ public:
     // 获取组ID
     int getGid() const { return gid; }
 
+    // 获取密码（直接访问，不做加密）
+    const std::string& getPassword() const { return password_hash; }
+
     // 验证密码
     bool verifyPassword(const std::string& pw) const {
         return password_hash == pw;
@@ -57,6 +65,12 @@ public:
         // 初始化默认管理员用户
         //用户名为root，密码为root， 设置uid为0，gid也为0
         addUser("root", "root", 0, 0);
+    }
+
+    // 复制构造函数
+    UserManager(const UserManager& other)
+        : users(other.users), user_ids(other.user_ids),
+          current_user(other.current_user), someone_logged_in(other.someone_logged_in) {
     }
 
     // 添加用户
@@ -155,6 +169,19 @@ public:
                       << std::setw(10) << user.getGid() << std::endl;
         }
     }
+
+    // 将用户数据保存到文件系统中
+    bool saveUsersToFS(MiniFS* fs);
+
+    // 从文件系统中加载用户数据
+    bool loadUsersFromFS(MiniFS* fs);
+
+    // 获取用户信息字符串（用于保存）
+    std::string getUsersDataString() const;    // 从字符串解析用户信息（用于加载）
+    bool parseUsersDataString(const std::string& data);
+
+    // 清空所有用户数据（用于测试）
+    void clearUsers();
 };
 
 #endif // USER_H

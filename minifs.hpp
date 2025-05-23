@@ -9,7 +9,7 @@
 #include <memory>
 #include <cstring>
 #include <sstream>
-#include "user.hpp" // 添加用户管理相关头文件
+#include "user.hpp" // 包含完整的 user.hpp
 
 typedef unsigned char Byte;
 //位图块定义
@@ -80,7 +80,13 @@ public:
     static const int ROOT_INUM_CONST = 1; // 根目录的i-节点号通常约定为1
     static const int INVALID_INUM_CONST = -1; // 表示无效或未找到的i-节点号
 
+    // 用户管理相关方法
+    UserManager userManager;  // 用户管理器，直接作为成员对象
+
+    // 构造函数
     MiniFS();
+    ~MiniFS(); // 添加析构函数处理资源
+    
     void readBlock(int blockNum, void* buf);
     void writeBlock(int blockNum, const void* buf);
     int saveFS(const std::string& filename);
@@ -130,38 +136,35 @@ public:
     // 删除文件
     int rm(int parent_dir_inum, const char* name);
 
-    // 用户管理相关方法
-    UserManager userManager;  // 用户管理器
-
     // 用户登录
-    bool login(const std::string& username, const std::string& password) {
-        return userManager.login(username, password);
-    }
+    bool login(const std::string& username, const std::string& password);
 
     // 用户登出
-    bool logout() {
-        return userManager.logout();
-    }
+    bool logout();
 
     // 添加用户
-    bool addUser(const std::string& username, const std::string& password, int uid, int gid) {
-        return userManager.addUser(username, password, uid, gid);
-    }
+    bool addUser(const std::string& username, const std::string& password, int uid, int gid);
 
     // 列出所有用户
-    void listUsers() {
-        userManager.listUsers();
-    }
+    void listUsers();
 
     // 检查当前是否有用户登录
-    bool isLoggedIn() const {
-        return userManager.isLoggedIn();
-    }
+    bool isLoggedIn() const;
 
     // 获取当前用户
-    const User& getCurrentUser() const {
-        return userManager.getCurrentUser();
-    }
+    const User& getCurrentUser() const;
+
+    // 保存用户数据到文件系统
+    bool saveUserData();
+    
+    // 从文件系统加载用户数据
+    bool loadUserData();
+    
+    // 在格式化时保存用户数据
+    void formatWithUserPreservation();
+
+    // 清除用户数据
+    void clearUserData(); // 添加这个方法声明
 
 private:
     std::vector<Byte> disk;

@@ -1,7 +1,7 @@
 #include "fs_tests.hpp"
 #include "shell_utils.hpp"
 #include "minifs.hpp"
-
+#include "user.hpp"
 // 全局或在runInteractiveShell作用域内定义当前工作目录i-节点号
 // 由于没有cd命令，它将一直为根目录
 static int current_working_directory_inum = MiniFS::ROOT_INUM_CONST;
@@ -22,6 +22,7 @@ void showHelp() {
     std::cout << "  test-bitmap             - 运行位图操作测试" << std::endl;
     std::cout << "  test-directory          - 运行目录操作测试 (旧版，可能不完全兼容路径)" << std::endl;
     std::cout << "  test-file               - 运行文件操作测试" << std::endl;
+    std::cout << "  test-user               - 运行用户管理功能测试" << std::endl;
     std::cout << "  format                  - 格式化文件系统" << std::endl;
     std::cout << "  save                    - 保存文件系统" << std::endl;
     std::cout << "  status                  - 显示文件系统状态" << std::endl;
@@ -32,6 +33,8 @@ void showHelp() {
     std::cout << "  useradd <用户名> <UID> <GID> - 添加新用户" << std::endl;
     std::cout << "  users                   - 列出所有用户" << std::endl;
     std::cout << "  whoami                  - 显示当前用户" << std::endl;
+    std::cout << "  save-users              - 保存用户数据到文件系统" << std::endl;
+    std::cout << "  load-users              - 从文件系统加载用户数据" << std::endl;
     std::cout << "===============================================" << std::endl;
 }
 
@@ -139,6 +142,9 @@ void runInteractiveShell(MiniFS& fs, const std::string& fsfile) {
     std::cout << "输入 'help' 查看可用命令，输入 'exit' 退出" << std::endl;
     std::cout << "=========================================" << std::endl;
     
+    // 尝试从文件系统加载用户数据
+    fs.loadUserData();
+    
     // 定义需要用户登录的命令列表
     const std::vector<std::string> user_required_commands = {
         "mkdir", "rmdir", "rm", "cd", "chdir", "create", "open", 
@@ -171,7 +177,12 @@ void runInteractiveShell(MiniFS& fs, const std::string& fsfile) {
         try {
             // 1. 系统控制命令 - 不需要登录权限检查
             if (command == "exit" || command == "quit") {
-                std::cout << "正在保存并退出..." << std::endl;
+                std::cout << "正在保存用户数据和文件系统..." << std::endl;
+                
+                // 保存用户数据
+                fs.saveUserData();
+                
+                // 保存文件系统
                 if (fs.saveFS(fsfile) == 0) {
                     std::cout << "文件系统已保存到 " << fsfile << std::endl;
                 } else {
@@ -193,15 +204,30 @@ void runInteractiveShell(MiniFS& fs, const std::string& fsfile) {
                 }
             }
             else if (command == "format") {
-                std::cout << "警告: 这将清除所有数据! 确认吗? (y/N): ";
+                std::cout << "警告: 这将清除所有文件数据! 是否同时保留用户账户? (Y/n): ";
                 std::string confirm;
                 std::getline(std::cin, confirm);
-                if (confirm == "y" || confirm == "Y" || confirm == "yes") {
-                    fs.format();
-                    current_working_directory_inum = MiniFS::ROOT_INUM_CONST; // 重置CWD
-                    std::cout << "文件系统已重新格式化. 当前目录已重置为根目录。" << std::endl;
+                
+                if (confirm == "n" || confirm == "N") {
+                    std::cout << "将格式化文件系统并重置所有用户信息。确认吗? (y/N): ";
+                    std::getline(std::cin, confirm);
+                    if (confirm == "y" || confirm == "Y" || confirm == "yes") {
+                        fs.format();
+                        current_working_directory_inum = MiniFS::ROOT_INUM_CONST; // 重置CWD
+                        std::cout << "文件系统已重新格式化，用户信息已重置。当前目录已重置为根目录。" << std::endl;
+                    } else {
+                        std::cout << "操作已取消" << std::endl;
+                    }
                 } else {
-                    std::cout << "操作已取消" << std::endl;
+                    std::cout << "将格式化文件系统但保留用户信息。确认吗? (y/N): ";
+                    std::getline(std::cin, confirm);
+                    if (confirm == "y" || confirm == "Y" || confirm == "yes") {
+                        fs.formatWithUserPreservation();
+                        current_working_directory_inum = MiniFS::ROOT_INUM_CONST; // 重置CWD
+                        std::cout << "文件系统已重新格式化，用户信息已保留。当前目录已重置为根目录。" << std::endl;
+                    } else {
+                        std::cout << "操作已取消" << std::endl;
+                    }
                 }
             }
             
@@ -255,6 +281,20 @@ void runInteractiveShell(MiniFS& fs, const std::string& fsfile) {
                               << ", GID: " << current_user.getGid() << ")" << std::endl;
                 } else {
                     std::cout << "未登录" << std::endl;
+                }
+            }
+            else if (command == "save-users") {
+                if (fs.saveUserData()) {
+                    std::cout << "用户数据已成功保存到文件系统" << std::endl;
+                } else {
+                    std::cout << "保存用户数据失败" << std::endl;
+                }
+            }
+            else if (command == "load-users") {
+                if (fs.loadUserData()) {
+                    std::cout << "用户数据已成功从文件系统加载" << std::endl;
+                } else {
+                    std::cout << "从文件系统加载用户数据失败，将使用默认配置" << std::endl;
                 }
             }
             

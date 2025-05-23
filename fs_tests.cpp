@@ -1,7 +1,7 @@
 #include "fs_tests.hpp"
 #include "shell_utils.hpp"
 #include "minifs.hpp"
-
+#include "user.hpp"
 void test_bitmap_operations(MiniFS& fs) 
 {
     std::cout << "--- 开始位图操作测试 ---" << std::endl;
@@ -239,6 +239,7 @@ void test_user_operations(MiniFS& fs) {
     std::cout << "\n步骤1: 添加测试用户" << std::endl;
     fs.addUser("test_user1", "password1", 1001, 1001);
     fs.addUser("test_user2", "password2", 1002, 1002);
+    fs.addUser("admin", "admin123", 500, 500);
 
     // 2. 测试列出用户
     std::cout << "\n步骤2: 列出系统用户" << std::endl;
@@ -260,34 +261,74 @@ void test_user_operations(MiniFS& fs) {
         std::cout << "当前无用户登录" << std::endl;
     }
 
-    // 5. 测试用户登出
-    std::cout << "\n步骤5: 用户登出测试" << std::endl;
+    // 5. 测试用户数据保存到文件系统
+    std::cout << "\n步骤5: 测试用户数据保存到文件系统" << std::endl;
+    bool save_result = fs.saveUserData();
+    std::cout << "用户数据保存" << (save_result ? "成功" : "失败") << std::endl;
+
+    // 6. 测试用户登出
+    std::cout << "\n步骤6: 用户登出测试" << std::endl;
     bool logout_result = fs.logout();
     std::cout << "用户登出" << (logout_result ? "成功" : "失败") << std::endl;
 
-    // 6. 测试错误情况
-    std::cout << "\n步骤6: 测试错误情况" << std::endl;
+    // 7. 测试从文件系统加载用户数据
+    std::cout << "\n步骤7: 测试从文件系统加载用户数据" << std::endl;
     
-    // 6.1. 使用错误密码登录
+    // 先清空一个用户来模拟重新加载
+    std::cout << "清空内存中的用户数据..." << std::endl;
+    fs.clearUserData(); // 需要确保这个方法存在
+    
+    std::cout << "清空后的用户列表:" << std::endl;
+    fs.listUsers();
+    
+    // 从文件系统重新加载
+    bool load_result = fs.loadUserData();
+    std::cout << "用户数据加载" << (load_result ? "成功" : "失败") << std::endl;
+    
+    if (load_result) {
+        std::cout << "重新加载后的用户列表:" << std::endl;
+        fs.listUsers();
+    }
+
+    // 8. 测试错误情况
+    std::cout << "\n步骤8: 测试错误情况" << std::endl;
+    
+    // 8.1. 使用错误密码登录
     std::cout << "尝试使用错误密码登录: ";
     login_result = fs.login("test_user1", "wrong_password");
     std::cout << (login_result ? "意外成功!" : "预期失败") << std::endl;
     
-    // 6.2. 使用不存在的用户登录
+    // 8.2. 使用不存在的用户登录
     std::cout << "尝试使用不存在的用户登录: ";
     login_result = fs.login("non_existent_user", "password");
     std::cout << (login_result ? "意外成功!" : "预期失败") << std::endl;
     
-    // 6.3. 尝试添加已存在的用户
+    // 8.3. 尝试添加已存在的用户
     std::cout << "尝试添加已存在的用户: ";
     bool add_result = fs.addUser("test_user1", "new_password", 1003, 1003);
     std::cout << (add_result ? "意外成功!" : "预期失败") << std::endl;
 
-    // 7. 清理测试状态
-    std::cout << "\n步骤7: 确保登录状态一致" << std::endl;
+    // 9. 测试管理员用户登录
+    std::cout << "\n步骤9: 测试管理员用户登录" << std::endl;
+    login_result = fs.login("admin", "admin123");
+    std::cout << "管理员登录" << (login_result ? "成功" : "失败") << std::endl;
+    
+    if (fs.isLoggedIn()) {
+        const User& admin_user = fs.getCurrentUser();
+        std::cout << "当前管理员: " << admin_user.getUsername() 
+                  << " (UID: " << admin_user.getUid() 
+                  << ", GID: " << admin_user.getGid() << ")" << std::endl;
+    }
+
+    // 10. 清理测试状态
+    std::cout << "\n步骤10: 清理测试状态" << std::endl;
     if (fs.isLoggedIn()) {
         fs.logout();
     }
+    
+    // 最终保存一次用户数据
+    std::cout << "最终保存用户数据到文件系统..." << std::endl;
+    fs.saveUserData();
     
     std::cout << "--- 用户管理功能测试结束 ---" << std::endl;
 }

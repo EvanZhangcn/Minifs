@@ -11,6 +11,7 @@
                 "main.cpp",
                 "fs_tests.cpp",
                 "shell_utils.cpp",
+                "user.cpp",
                 "-o",
                 "minifs.exe"
             ],

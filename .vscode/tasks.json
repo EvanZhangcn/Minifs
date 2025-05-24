@@ -2,20 +2,70 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "编译 minifs (C++)",
             "type": "shell",
+            "label": "静态编译 MiniFS (推荐)",
+            "command": "${workspaceFolder}\\build_static.bat",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "type": "shell",
+            "label": "静态编译 MiniFS (g++)",
             "command": "g++",
             "args": [
-                "-g",
-                "minifs.cpp",
+                "-std=c++11",
+                "-O2",
+                "-static",
+                "-static-libgcc",
+                "-static-libstdc++",
                 "main.cpp",
+                "minifs.cpp", 
                 "fs_tests.cpp",
                 "shell_utils.cpp",
                 "user.cpp",
                 "-o",
                 "minifs.exe"
             ],
-            "group": "build"
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": ["$gcc"]
         },
+        {
+            "type": "cppbuild",
+            "label": "单文件编译 (C++)",
+            "command": "C:\\MinGW\\bin\\g++.exe",
+            "args": [
+                "-fdiagnostics-color=always",
+                "-g",
+                "-static",
+                "-static-libgcc",
+                "-static-libstdc++",
+                "${file}",
+                "-o",
+                "${fileDirname}\\${fileBasenameNoExtension}.exe"
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "problemMatcher": ["$gcc"],
+            "group": "build"
+        }
     ]
 }

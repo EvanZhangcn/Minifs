@@ -3,20 +3,85 @@
 
 一个基于C++实现的UNIX风格文件系统模拟器，支持目录操作、文件读写、用户管理等完整功能。
 
+## 🚀 快速开始
+
+### 直接运行（推荐）
+
+如果您只是想体验 MiniFS，可以直接运行预编译的可执行文件：
+
+**方式一：使用启动脚本（推荐，解决中文乱码）**
+```bash
+# 双击运行启动脚本，自动设置UTF-8编码
+启动MiniFS.bat    # 交互模式
+测试MiniFS.bat    # 测试模式
+```
+
+**方式二：直接运行**
+```bash
+# 直接运行（可能在某些系统上有中文乱码）
+./minifs.exe      # 交互模式
+./minifs.exe --test  # 测试模式
+```
+
+### 自行编译
+
+#### Windows (推荐方法)
+
+1. **使用批处理脚本（最简单）**：
+   ```bash
+   build_static.bat
+   ```
+
+2. **使用 VS Code**：
+   - 按 `Ctrl+Shift+P`
+   - 输入 "Tasks: Run Task"
+   - 选择 "静态编译 MiniFS (推荐)"
+
+3. **使用 Makefile**：
+   ```bash
+   make static
+   ```
+
+## 💡 中文乱码解决方案
+
+如果在其他电脑上运行时出现中文乱码，请：
+
+1. **使用提供的启动脚本**：
+   - `启动MiniFS.bat` - 交互模式
+   - `测试MiniFS.bat` - 测试模式
+   
+2. **手动设置编码**：
+   ```bash
+   chcp 65001
+   minifs.exe
+   ```
+
+3. **程序已内置编码处理**：
+   - 程序启动时会自动设置控制台为UTF-8编码
+   - 如果仍有问题，请使用启动脚本
+
 ## 项目结构
 
 ```
-├── minifs.hpp          - 文件系统核心头文件，定义所有结构体和常量
-├── minifs.cpp          - 文件系统核心实现
+├── minifs.exe          - 静态编译的可执行文件 ⭐
+├── 启动MiniFS.bat      - 启动脚本（解决中文乱码）⭐
+├── 测试MiniFS.bat      - 测试脚本（解决中文乱码）⭐
+├── build_static.bat   - Windows 静态编译脚本 ⭐
+├── encoding_utils.hpp - 编码处理工具 ⭐
 ├── main.cpp           - 主程序入口
+├── minifs.hpp         - 文件系统核心头文件
+├── minifs.cpp         - 文件系统核心实现
 ├── shell_utils.hpp    - 交互式Shell工具头文件
 ├── shell_utils.cpp    - 交互式Shell实现
 ├── user.hpp           - 用户管理系统头文件
 ├── user.cpp           - 用户管理系统实现
 ├── fs_tests.hpp       - 测试模块头文件
 ├── fs_tests.cpp       - 文件系统测试用例
+├── Makefile          - 跨平台编译配置
 ├── .vscode/tasks.json - VS Code编译任务配置
-└── README.md          - 项目说明文档
+├── README.md          - 项目说明文档
+├── RELEASE.md         - 发布说明
+└── my_unix_fs.dat     - 文件系统数据文件（运行时生成）
 ```
 
 ## 编译方法

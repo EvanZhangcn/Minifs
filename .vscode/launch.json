@@ -1,19 +1,29 @@
 {
-    "version": "0.2.0",
-    "configurations": [
+    "version": "2.0.0",
+    "tasks": [
         {
-            "name": "运行 minifs.exe (C++)", // You can keep this name
-            "type": "cppdbg",             // <--- CHANGE THIS to "cppdbg"
-            "request": "launch",
-            "program": "${workspaceFolder}/minifs.exe", // Path to your executable
-            "args": [],
-            "stopAtEntry": false,         // Set to true if you want to stop at the very beginning of main
-            "cwd": "${workspaceFolder}",
-            "environment": [],
-            "console": "integratedTerminal",
-            "MIMode": "gdb",              // <--- ADD THIS to specify GDB
-            "miDebuggerPath": "D:\\mingw_new\\mingw64\\bin\\gdb.exe", // <--- ADD THIS and set it to YOUR gdb.exe path
-            "preLaunchTask": "编译 minifs (C++)" // This is good, ensures compilation before launch
+            "type": "cppbuild",
+            "label": "编译 minifs (C++)",
+            "command": "D:\\mingw_new\\mingw64\\bin\\g++.exe",
+            "args": [
+                "-fdiagnostics-color=always",
+                "-g",
+                "-static",
+                "-static-libgcc", 
+                "-static-libstdc++",
+                "${workspaceFolder}/*.cpp",
+                "-o",
+                "${workspaceFolder}/minifs.exe"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": ["$gcc"],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "编译器: D:\\mingw_new\\mingw64\\bin\\g++.exe"
         }
     ]
 }

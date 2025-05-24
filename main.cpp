@@ -1,17 +1,17 @@
 #include "fs_tests.hpp"
 #include "shell_utils.hpp"
 #include "minifs.hpp"
-
-
+#include "encoding_utils.hpp"
 
 // 在 main 函数中
 int main(int argc, char *argv[]) {
+    // 初始化控制台编码，解决中文乱码问题
+    EncodingUtils::initConsoleEncoding();
+    
     const std::string fsfile = "my_unix_fs.dat";
     MiniFS fs;
     
-    std::cout << "========== MiniFS 文件系统启动 ==========" << std::endl;
-    
-    // 尝试加载已有文件系统，如果失败则格式化
+    std::cout << "========== MiniFS 文件系统启动 ==========" << std::endl;    // 尝试加载已有文件系统，如果失败则格式化
     std::cout << "尝试加载文件系统镜像: " << fsfile << std::endl;
     MiniFS::FSStatus load_result = fs.loadFS(fsfile);
     
